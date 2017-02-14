@@ -1,113 +1,91 @@
-import sys
-import os
-import time
-import threading
-import RPi.GPIO as GPIO
-import tweepy
-import random
+from telegram_send import send
+from threading import Thread
+
+import traceback
+import logging
+import datetime
+import RPi.GPIO
 import requests
 import json
-from ConfigParser import SafeConfigParser
-from time import gmtime, strftime
+import sys
+import time
 
-def pushbullet( cfg, msg ):
-	try:
-		data_send = {"type": "note", "title": "VibrationBot", "body": msg}
-		resp = requests.post(
-			'https://api.pushbullet.com/v2/pushes',
-			data=json.dumps(data_send),
-			headers={'Authorization': 'Bearer '+cfg, 'Content-Type': 'application/json'})
-	except (KeyboardInterrupt, SystemExit):
-		raise
-	except:
-		pass
 
-def tweet(msg):
-	try:
-		tweet = msg + ' ' + strftime("%Y-%m-%d %H:%M:%S", gmtime())
-		auth = tweepy.OAuthHandler(twitter_api_key, twitter_api_secret)
-		auth.set_access_token(twitter_access_token, twitter_access_token_secret)
-	   	tweepy.API(auth).update_status(status=tweet) 
-	except (KeyboardInterrupt, SystemExit):
-		raise
-	except:
-		pass
+class LaundryMassager(object):
+    """Uses a Vibration sensor to keep track of the dryer."""
 
-def send_alert(message):
-	if len(message) > 1:
-		print message;
-		if len(pushbullet_api_key) > 0:
-			pushbullet(pushbullet_api_key, message)
-		if len(pushbullet_api_key2) > 0:
-			pushbullet(pushbullet_api_key2, message)
-		if len(twitter_api_key) > 0:
-			tweet(message)
+    def __init__(self):
+        self.sensor_pin       = 14  # Default Sensor pin is 14
+        self.s_vib_time       = 0
+        self.l_vib_time       = 0
+        self.appliance_active = False
+        self.active_message   = "Dryer has started."
+        self.stopped_message  = "Dryer has Stopped."
+        self.inactive_message = "Dryer has been inactive since {t}"
+        self.log_file = "/home/pi/projects/vib.log"
+        self.count = 0
+        self.count_thresh = 40
 
-def send_appliance_active_message():
-	send_alert(start_message)
-	global appliance_active
-	appliance_active = True
+    def get_logger(self):
+        """Get Logger."""
+        self.log = logging.getLogger(__name__)
+        self.log.setLevel(logging.INFO)
 
-def send_appliance_inactive_message():
-	send_alert(end_message)
-	global appliance_active
-	appliance_active = False
+        handler = logging.FileHandler(self.log_file)
+        handler.setLevel(logging.INFO)
 
-def vibrated(x):
-	global vibrating
-	global last_vibration_time
-	global start_vibration_time
-	print 'Vibrated'
-	last_vibration_time = time.time()
-	if not vibrating:
-		start_vibration_time = last_vibration_time
-		vibrating = True
+        formatter = logging.Formatter('%(asctime)s - %(funcName)s - %(levelname)s - %(message)s')
+        handler.setFormatter(formatter)
+        self.log.addHandler(handler)
 
-def heartbeat():
-	print 'HB'
-	current_time = time.time()
-	global vibrating
-	if vibrating \
-		and last_vibration_time - start_vibration_time > begin_seconds \
-		and not appliance_active:
-			send_appliance_active_message()
-	if not vibrating \
-		and appliance_active \
-		and current_time - last_vibration_time > end_seconds:
-			send_appliance_inactive_message()
-	vibrating = current_time - last_vibration_time < 2
-	threading.Timer(1,heartbeat).start()
+    def vibrated(self, x):
+        #self.log.info("Vibrated")
+        self.count += 1
+        if self.count >= self.count_thresh:
+            self.log.info("Vibrated {c} times.".format(c=self.count))
+            self.count = 0
 
-if len(sys.argv) == 1:
-	print "No config file specified"
-	sys.exit()
+    def convert_timestamp(ts):
+        """Return a string of datetime from a time.time() timestamp."""
+        return str(datetime.datetime.fromtimestamp(ts).strftime('%c'))
 
-vibrating = False
-appliance_active = False
-last_vibration_time = time.time()
-start_vibration_time = last_vibration_time
+    def send_appliance_active(self):
+        self.send_alert(message=self.active_message)
 
-config = SafeConfigParser()
-config.read(sys.argv[1])
-sensor_pin = config.getint('main', 'SENSOR_PIN')
-begin_seconds = config.getint('main', 'SECONDS_TO_START')
-end_seconds = config.getint('main', 'SECONDS_TO_END')
-pushbullet_api_key = config.get('pushbullet', 'API_KEY')
-pushbullet_api_key2 = config.get('pushbullet', 'API_KEY2')
-start_message = config.get('main', 'START_MESSAGE')
-end_message = config.get('main', 'END_MESSAGE')
-twitter_api_key = config.get('twitter', 'api_key')
-twitter_api_secret = config.get('twitter', 'api_secret')
-twitter_access_token = config.get('twitter', 'access_token')
-twitter_access_token_secret = config.get('twitter', 'access_token_secret')
-send_alert( config.get('main', 'BOOT_MESSAGE') )
+    def send_appliance_stopped(self):
+        self.send_alert(message=self.stopped_message)
 
-GPIO.setwarnings(False)
-GPIO.setmode(GPIO.BCM)
-GPIO.setup(sensor_pin,GPIO.IN,pull_up_down=GPIO.PUD_DOWN)
-GPIO.add_event_detect(sensor_pin,GPIO.RISING)
-GPIO.add_event_callback(sensor_pin,vibrated)
+    def send_appliance_inactive(self):
+        self.send_alert(message=self.inactive_message.format(t=self.convert_timestamp(ts=self.l_vib_time)))
 
-print "Running config file " + sys.argv[1] + " monitoring GPIO pin " + str(sensor_pin)
-threading.Timer(1,heartbeat).start()
+    def send_alert(self, message):
+        mlist = []
+        mlist.append(message)
+        try:
+            send(messages=mlist)
+        except Exception as e:
+            tb = traceback.format_exc()
+            self.log.error("Problem with sending telegram message. e:{e}; tb:{tb}".format(e=e, tb=tb))
 
+    def gpio_setup(self, sensor_pin):
+        try:
+            RPi.GPIO.setwarnings(False)
+            RPi.GPIO.setmode(RPi.GPIO.BCM)
+            RPi.GPIO.setup(sensor_pin, RPi.GPIO.IN, pull_up_down=RPi.GPIO.PUD_DOWN)
+            RPi.GPIO.add_event_detect(sensor_pin, RPi.GPIO.RISING, callback=self.vibrated, bouncetime=1)
+            #RPi.GPIO.add_event_callback(sensor_pin, self.vibrated)
+        except Exception as e:
+            tb = traceback.format_exc()
+            self.log.error("Problem setting up gpio pin monitoring. e:{e}; tb:{tb}".format(e=e, tb=tb))
+        else:
+            self.log.info("Monitoring GPIO pin #{n} Setup Successfully.".format(n=str(sensor_pin)))
+
+    def main(self):
+        self.get_logger()
+        self.gpio_setup(sensor_pin=self.sensor_pin)
+        while True:
+            time.sleep(1)
+
+if __name__ == '__main__':
+   lm = LaundryMassager()
+   lm.main()
