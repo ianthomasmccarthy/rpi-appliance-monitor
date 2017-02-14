@@ -1,5 +1,5 @@
 from telegram_send import send
-# from threading import Thread
+from threading import Thread
 
 import traceback
 import logging
@@ -28,11 +28,16 @@ class LaundryMassager(object):
         self.stopped = 0
         self.stopped_thresh = 3
         self.inactive_thresh = 86400
+        self.debug = True
+        self.active = False
 
     def get_logger(self):
         """Get Logger."""
         self.log = logging.getLogger(__name__)
-        self.log.setLevel(logging.INFO)
+        if self.debug:
+            self.log.setLevel(logging.DEBUG)
+        else:
+            self.log.setLevel(logging.INFO)
 
         handler = logging.FileHandler(self.log_file)
         handler.setLevel(logging.INFO)
@@ -47,18 +52,28 @@ class LaundryMassager(object):
         if self.count < self.count_thresh:
             return
         if self.count >= self.count_thresh:
-            self.count = 0 # Reset a greater than count here.
+            self.count = 0  # Reset a greater than count here.
             self.l_vib_time = time.time()
             if self.active:
+                self.log.debug("Vibrating but already active.")
                 return
             if not self.active:
+                self.log.debug("Becoming active")
                 self.active = True
                 self.s_vib_time = time.time()
                 self.send_appliance_active()
+                self.log.debug("Should have sent appliance active message")
+
+    def spawn_monitor(self):
+        t = Thread(target=self.monitor, args=())
+        t.daemon = True
+        t.start()
+        return
 
     def monitor(self):
         while True:
             try:
+                self.log.debug("Sleeping for {s} seconds".format(s=self.sleep_interval))
                 time.sleep(self.sleep_interval)
                 if self.active:
                     if self.count < self.count_thresh:
@@ -110,6 +125,7 @@ class LaundryMassager(object):
     def main(self):
         self.get_logger()
         self.gpio_setup(sensor_pin=self.sensor_pin)
+        self.spawn_monitor()
         while True:
             time.sleep(1)
 
