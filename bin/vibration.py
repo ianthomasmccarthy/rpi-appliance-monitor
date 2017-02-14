@@ -21,7 +21,7 @@ class LaundryMassager(object):
         self.active_message   = "Dryer has started."
         self.stopped_message  = "Dryer has Stopped. Duration {t} minutes."
         self.inactive_message = "Dryer has been inactive since {t}"
-        self.log_file = "/home/pi/projects/rpi-appliance-monitor/logs/vib.log"
+        self.log_file = "/home/pi/rpi-appliance-monitor/logs/vib.log"
         self.count = 0
         self.count_thresh = 40
         self.sleep_interval = 60
