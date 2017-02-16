@@ -50,7 +50,7 @@ class LaundryMassager(object):
         """Return a string of datetime from a time.time() timestamp."""
         try:
             retval = str(datetime.datetime.fromtimestamp(ts).strftime('%c'))
-        except Exception as e:
+        except:
             retval = "Date Error"
         finally:
             return retval
@@ -94,6 +94,7 @@ class LaundryMassager(object):
 
     def should_stop(self):
         now = int(time.time())
+        self.log.debug("Checking if should stop.")
         if (int(now) - int(self.l_vib_time)) > self.stopped_thresh:
             self.appliance_active = False
             tot_time = int(now) - int(self.s_vib_time) / 60
@@ -106,11 +107,11 @@ class LaundryMassager(object):
 
     def inactive_check(self):
         now = int(time.time())
+        self.log.debug("Checking for inactive.")
         if (now - self.l_vib_time) > self.inactive_thresh:
             self.log.info("Sending Appliance Inactive Message.")
             self.send_appliance_inactive()
             self.l_vib_time = now
-
 
     def main(self):
         self.get_logger()
