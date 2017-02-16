@@ -21,7 +21,7 @@ class LaundryMassager(object):
         self.appliance_active = False
         self.sensor_pin = 14  # Default Sensor pin is 14
         self.s_vib_time = 0
-        self.l_vib_time = 0
+        self.l_vib_time = time.time()
         self.count = 0
         self.count_thresh = 20  # How many times it has to vib to not be a false positive
         self.sleep_interval = 20
@@ -89,6 +89,7 @@ class LaundryMassager(object):
         now = int(time.time())
         self.appliance_active = True
         self.s_vib_time = now
+        self.log.info("Sending Appliance Active Message.")
         self.send_appliance_active()
 
     def should_stop(self):
@@ -96,6 +97,7 @@ class LaundryMassager(object):
         if (int(now) - int(self.l_vib_time)) > self.stopped_thresh:
             self.appliance_active = False
             tot_time = int(now) - int(self.s_vib_time) / 60
+            self.log.info("Sending Appliance Stopping Message. Duration was {d}".format(d=tot_time))
             self.send_appliance_stopped(duration=tot_time)
             self.reset()
 
@@ -105,7 +107,10 @@ class LaundryMassager(object):
     def inactive_check(self):
         now = int(time.time())
         if (now - self.l_vib_time) > self.inactive_thresh:
+            self.log.info("Sending Appliance Inactive Message.")
             self.send_appliance_inactive()
+            self.l_vib_time = now
+
 
     def main(self):
         self.get_logger()
@@ -114,6 +119,7 @@ class LaundryMassager(object):
             self.count = 0
             time.sleep(self.sleep_interval)
             try:
+                self.log.debug("Count was {c}".format(c=self.count))
                 if self.count >= self.count_thresh:
                     if self.appliance_active:
                         continue
