@@ -1,9 +1,9 @@
-# from telegram_send import send
+from telegram_send import send
 
 import traceback
 import logging
 import datetime
-# import RPi.GPIO
+import RPi.GPIO
 import time
 
 
