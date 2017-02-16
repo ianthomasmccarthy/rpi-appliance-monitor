@@ -23,10 +23,10 @@ class LaundryMassager(object):
         self.s_vib_time = 0
         self.l_vib_time = time.time()
         self.count = 0
-        self.count_thresh = 20  # How many times it has to vib to not be a false positive
+        self.count_thresh = 10  # How many times it has to vib to not be a false positive
         self.sleep_interval = 20
         self.inactive_thresh = 86400  # Counting a full day between last vib before sending inactive message
-        self.stopped_thresh = 120  # after 120 seconds will it consider it really stopped.
+        self.stopped_thresh = 60  # after 120 seconds will it consider it really stopped.
 
     def get_logger(self):
         """Get Logger."""
@@ -41,7 +41,6 @@ class LaundryMassager(object):
         self.log.addHandler(handler)
 
     def vibrated(self, x):
-        self.log.debug("Vibrated callback.")
         self.count += 1
         self.l_vib_time = int(time.time())
 
@@ -97,7 +96,7 @@ class LaundryMassager(object):
         self.log.debug("Checking if should stop.")
         if (int(now) - int(self.l_vib_time)) > self.stopped_thresh:
             self.appliance_active = False
-            tot_time = int(now) - int(self.s_vib_time) / 60
+            tot_time = (int(now) - int(self.s_vib_time)) / 60
             self.log.info("Sending Appliance Stopping Message. Duration was {d}".format(d=tot_time))
             self.send_appliance_stopped(duration=tot_time)
             self.reset()
