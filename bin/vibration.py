@@ -128,8 +128,8 @@ class LaundryMassager(object):
                     else:
                         self.inactive_check()
                     continue
-        except Exception as e:
-            self.log.error("General Issue: e:{e}".format(e=e))
+            except Exception as e:
+                self.log.error("General Issue: e:{e}".format(e=e))
 
 if __name__ == '__main__':
     lm = LaundryMassager()
