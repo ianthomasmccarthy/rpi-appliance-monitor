@@ -30,16 +30,15 @@ class LaundryMassager(object):
 
     def get_logger(self):
         """Get Logger."""
-        if self.log is None:
-            self.log = logging.getLogger(__name__)
-            handler = logging.FileHandler(self.log_file)
-            if self.debug:
-                self.log.setLevel(logging.DEBUG)
-            else:
-                self.log.setLevel(logging.INFO)
-                formatter = logging.Formatter('%(asctime)s - %(funcName)s - %(levelname)s - %(message)s')
-                handler.setFormatter(formatter)
-                self.log.addHandler(handler)
+        self.log = logging.getLogger(__name__)
+        if self.debug:
+            self.log.setLevel(logging.DEBUG)
+        else:
+            self.log.setLevel(logging.INFO)
+        handler = logging.FileHandler(self.log_file)
+        formatter = logging.Formatter('%(asctime)s - %(funcName)s - %(levelname)s - %(message)s')
+        handler.setFormatter(formatter)
+        self.log.addHandler(handler)
 
     def vibrated(self, x):
         self.log.debug("Vibrated callback.")
