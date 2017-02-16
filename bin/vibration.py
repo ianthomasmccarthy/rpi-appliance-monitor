@@ -1,12 +1,9 @@
-from telegram_send import send
-from threading import Thread
+# from telegram_send import send
 
 import traceback
 import logging
 import datetime
-import RPi.GPIO
-# import json
-# import sys
+# import RPi.GPIO
 import time
 
 
@@ -14,83 +11,50 @@ class LaundryMassager(object):
     """Uses a Vibration sensor to keep track of the dryer."""
 
     def __init__(self):
-        self.sensor_pin       = 14  # Default Sensor pin is 14
-        self.s_vib_time       = 0
-        self.l_vib_time       = 0
-        self.appliance_active = False
-        self.active_message   = "Dryer has started."
-        self.stopped_message  = "Dryer has Stopped. Duration {t} minutes."
+        """Constructor."""
+        self.active_message = "Dryer has started."
+        self.stopped_message = "Dryer has Stopped. Duration {t} minutes."
         self.inactive_message = "Dryer has been inactive since {t}"
         self.log_file = "/home/pi/rpi-appliance-monitor/logs/vib.log"
-        self.count = 0
-        self.count_thresh = 40
-        self.sleep_interval = 60
-        self.stopped = 0
-        self.stopped_thresh = 3
-        self.inactive_thresh = 86400
+        self.log = None
         self.debug = True
-        self.active = False
+        self.appliance_active = False
+        self.sensor_pin = 14  # Default Sensor pin is 14
+        self.s_vib_time = 0
+        self.l_vib_time = 0
+        self.count = 0
+        self.count_thresh = 20  # How many times it has to vib to not be a false positive
+        self.sleep_interval = 20
+        self.inactive_thresh = 86400  # Counting a full day between last vib before sending inactive message
+        self.stopped_thresh = 120  # after 120 seconds will it consider it really stopped.
 
     def get_logger(self):
         """Get Logger."""
-        self.log = logging.getLogger(__name__)
-        if self.debug:
-            self.log.setLevel(logging.DEBUG)
-        else:
-            self.log.setLevel(logging.INFO)
-
-        handler = logging.FileHandler(self.log_file)
-        handler.setLevel(logging.INFO)
-
-        formatter = logging.Formatter('%(asctime)s - %(funcName)s - %(levelname)s - %(message)s')
-        handler.setFormatter(formatter)
-        self.log.addHandler(handler)
+        if self.log is None:
+            self.log = logging.getLogger(__name__)
+            handler = logging.FileHandler(self.log_file)
+            if self.debug:
+                self.log.setLevel(logging.DEBUG)
+            else:
+                self.log.setLevel(logging.INFO)
+                formatter = logging.Formatter('%(asctime)s - %(funcName)s - %(levelname)s - %(message)s')
+                handler.setFormatter(formatter)
+                self.log.addHandler(handler)
 
     def vibrated(self, x):
-        # self.log.info("Vibrated")
+        self.log.debug("Vibrated callback.")
         self.count += 1
-        if self.count < self.count_thresh:
-            return
-        if self.count >= self.count_thresh:
-            self.count = 0  # Reset a greater than count here.
-            self.l_vib_time = time.time()
-            if self.active:
-                self.log.debug("Vibrating but already active.")
-                return
-            if not self.active:
-                self.log.debug("Becoming active")
-                self.active = True
-                self.s_vib_time = time.time()
-                self.send_appliance_active()
-                self.log.debug("Should have sent appliance active message")
+        self.l_vib_time = int(time.time())
 
-    def spawn_monitor(self):
-        t = Thread(target=self.monitor, args=())
-        t.daemon = True
-        t.start()
-        return
-
-    def monitor(self):
-        while True:
-            try:
-                self.log.debug("Sleeping for {s} seconds".format(s=self.sleep_interval))
-                time.sleep(self.sleep_interval)
-                if self.active:
-                    if self.count < self.count_thresh:
-                        self.stopped += 1
-                        if self.stopped >= self.stopped_thresh:
-                            tot_time = time.time() - self.s_vib_time / 60
-                            self.send_appliance_stopped(duration=tot_time)
-                else:
-                    if self.l_vib_time > self.inactive_thresh:
-                        self.send_appliance_inactive()
-                        self.l_vib_time = time.time()
-            except Exception as e:
-                raise e
-
+    @staticmethod
     def convert_timestamp(ts):
         """Return a string of datetime from a time.time() timestamp."""
-        return str(datetime.datetime.fromtimestamp(ts).strftime('%c'))
+        try:
+            retval = str(datetime.datetime.fromtimestamp(ts).strftime('%c'))
+        except Exception as e:
+            retval = "Date Error"
+        finally:
+            return retval
 
     def send_appliance_active(self):
         self.send_alert(message=self.active_message)
@@ -122,12 +86,50 @@ class LaundryMassager(object):
         else:
             self.log.info("Monitoring GPIO pin #{n} Setup Successfully.".format(n=str(sensor_pin)))
 
+    def start_active(self):
+        now = int(time.time())
+        self.appliance_active = True
+        self.s_vib_time = now
+        self.send_appliance_active()
+
+    def should_stop(self):
+        now = int(time.time())
+        if (int(now) - int(self.l_vib_time)) > self.stopped_thresh:
+            self.appliance_active = False
+            tot_time = int(now) - int(self.s_vib_time) / 60
+            self.send_appliance_stopped(duration=tot_time)
+            self.reset()
+
+    def reset(self):
+        self.s_vib_time = 0
+
+    def inactive_check(self):
+        now = int(time.time())
+        if (now - self.l_vib_time) > self.inactive_thresh:
+            self.send_appliance_inactive()
+
     def main(self):
         self.get_logger()
         self.gpio_setup(sensor_pin=self.sensor_pin)
-        self.spawn_monitor()
         while True:
-            time.sleep(1)
+            self.count = 0
+            time.sleep(self.sleep_interval)
+            try:
+                if self.count >= self.count_thresh:
+                    if self.appliance_active:
+                        continue
+                    else:
+                        self.start_active()
+                        continue
+                else:
+                    if self.appliance_active:
+                        self.should_stop()
+                        continue
+                    else:
+                        self.inactive_check()
+                    continue
+        except Exception as e:
+            self.log.error("General Issue: e:{e}".format(e=e))
 
 if __name__ == '__main__':
     lm = LaundryMassager()
